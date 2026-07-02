@@ -29,6 +29,15 @@ window.__APP_CONFIG__ = {
     passField: 'pwd',
   },
 
+  /* --- Campos opcionales de art_m (referencia y código de barras) ----------
+   * Pon el nombre del campo tal cual está expuesto en el API. Déjalo en ''
+   * (cadena vacía) si el campo no existe: la app lo ignora sin romperse.
+   */
+  fields: {
+    referencia: 'ref',
+    codigoBarras: 'cod_bar',
+  },
+
   /* Nº de decimales para mostrar/editar precios (ARS suele usar 0 ó 2) */
   priceDecimals: 2,
 

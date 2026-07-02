@@ -11,3 +11,6 @@ dist-ssr
 *.tsbuildinfo
 vite.config.js
 vite.config.d.ts
+
+# vite-plugin-pwa dev output
+dev-dist

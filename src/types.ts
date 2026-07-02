@@ -11,6 +11,8 @@ export interface Articulo {
   es_nue?: boolean;
   por_dto?: number; // % descuento
   nom_img?: string;
+  // Campos opcionales (referencia / código de barras) según config del cliente
+  [key: string]: unknown;
 }
 
 /** fam_m — Familias */

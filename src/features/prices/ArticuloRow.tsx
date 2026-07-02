@@ -5,6 +5,8 @@ import {
 import EditIcon from '@mui/icons-material/Edit';
 import CheckIcon from '@mui/icons-material/Check';
 import CloseIcon from '@mui/icons-material/Close';
+import QrCode2Icon from '@mui/icons-material/QrCode2';
+import TagIcon from '@mui/icons-material/Tag';
 import type { Articulo } from '@/types';
 import { config } from '@/config';
 import { formatPrecio, parsePrecio } from '@/format';
@@ -16,11 +18,20 @@ interface Props {
   onSave: (id: number, pvp: number) => Promise<void>;
 }
 
+function campoTexto(articulo: Articulo, field: string): string {
+  if (!field) return '';
+  const v = articulo[field];
+  return v != null ? String(v) : '';
+}
+
 export function ArticuloRow({ articulo, familiaNombre, proveedorNombre, onSave }: Props) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState('');
   const [saving, setSaving] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const referencia = campoTexto(articulo, config.fields.referencia);
+  const codigoBarras = campoTexto(articulo, config.fields.codigoBarras);
 
   useEffect(() => {
     if (editing) inputRef.current?.select();
@@ -53,14 +64,41 @@ export function ArticuloRow({ articulo, familiaNombre, proveedorNombre, onSave }
   };
 
   return (
-    <Card variant="outlined" sx={{ p: 1.5 }}>
-      <Stack direction="row" alignItems="center" spacing={1.5}>
+    <Card variant="outlined" sx={{ p: { xs: 1.25, sm: 1.5 } }}>
+      <Stack direction="row" alignItems="center" spacing={1}>
         <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Typography noWrap fontWeight={600}>
+          <Typography noWrap fontWeight={600} sx={{ fontSize: { xs: 14, sm: 16 } }}>
             {articulo.name}
           </Typography>
+
+          {/* Referencia y código de barras */}
+          {(referencia || codigoBarras) && (
+            <Stack
+              direction="row"
+              spacing={1.5}
+              sx={{ mt: 0.25, color: 'text.secondary', flexWrap: 'wrap' }}
+            >
+              {referencia && (
+                <Stack direction="row" spacing={0.25} alignItems="center">
+                  <TagIcon sx={{ fontSize: 14 }} />
+                  <Typography variant="caption" sx={{ fontVariantNumeric: 'tabular-nums' }}>
+                    {referencia}
+                  </Typography>
+                </Stack>
+              )}
+              {codigoBarras && (
+                <Stack direction="row" spacing={0.25} alignItems="center">
+                  <QrCode2Icon sx={{ fontSize: 15 }} />
+                  <Typography variant="caption" sx={{ fontVariantNumeric: 'tabular-nums' }}>
+                    {codigoBarras}
+                  </Typography>
+                </Stack>
+              )}
+            </Stack>
+          )}
+
+          {/* Familia y proveedor */}
           <Stack direction="row" spacing={0.5} sx={{ mt: 0.5, flexWrap: 'wrap', gap: 0.5 }}>
-            <Chip size="small" label={`#${articulo.id}`} variant="outlined" />
             {familiaNombre && <Chip size="small" label={familiaNombre} />}
             {proveedorNombre && (
               <Chip size="small" color="secondary" variant="outlined" label={proveedorNombre} />
@@ -69,7 +107,7 @@ export function ArticuloRow({ articulo, familiaNombre, proveedorNombre, onSave }
         </Box>
 
         {editing ? (
-          <Stack direction="row" alignItems="center" spacing={0.5}>
+          <Stack direction="row" alignItems="center" spacing={0.25}>
             <TextField
               inputRef={inputRef}
               value={text}
@@ -82,7 +120,7 @@ export function ArticuloRow({ articulo, familiaNombre, proveedorNombre, onSave }
               type="text"
               inputMode="decimal"
               disabled={saving}
-              sx={{ width: 130 }}
+              sx={{ width: { xs: 108, sm: 130 } }}
               InputProps={{
                 startAdornment: (
                   <InputAdornment position="start">{config.currencySymbol}</InputAdornment>
@@ -97,8 +135,11 @@ export function ArticuloRow({ articulo, familiaNombre, proveedorNombre, onSave }
             </IconButton>
           </Stack>
         ) : (
-          <Stack direction="row" alignItems="center" spacing={0.5}>
-            <Typography variant="h6" sx={{ fontVariantNumeric: 'tabular-nums' }}>
+          <Stack direction="row" alignItems="center" spacing={0.25}>
+            <Typography
+              variant="h6"
+              sx={{ fontVariantNumeric: 'tabular-nums', fontSize: { xs: 16, sm: 20 }, whiteSpace: 'nowrap' }}
+            >
               {formatPrecio(articulo.pvp ?? 0)}
             </Typography>
             <IconButton color="primary" onClick={startEdit} aria-label="Editar precio">

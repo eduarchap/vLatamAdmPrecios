@@ -8,11 +8,17 @@ export interface LoginFields {
   passField: string;
 }
 
+export interface OptionalFields {
+  referencia: string;
+  codigoBarras: string;
+}
+
 export interface AppConfig {
   clientName: string;
   apiUrl: string;
   apiKey: string;
   login: LoginFields;
+  fields: OptionalFields;
   priceDecimals: number;
   currencySymbol: string;
 }
@@ -32,6 +38,10 @@ export const config: AppConfig = {
   login: {
     userField: runtime.login?.userField ?? 'name',
     passField: runtime.login?.passField ?? 'clave',
+  },
+  fields: {
+    referencia: runtime.fields?.referencia ?? '',
+    codigoBarras: runtime.fields?.codigoBarras ?? '',
   },
   priceDecimals: runtime.priceDecimals ?? 2,
   currencySymbol: runtime.currencySymbol ?? '$',
