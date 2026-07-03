@@ -1,23 +1,20 @@
-import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import {
-  Alert, Autocomplete, Box, Button, CircularProgress, Container, FormControl,
-  InputAdornment, InputLabel, LinearProgress, MenuItem, Select, Stack, TextField, Typography,
+  Alert, Autocomplete, Box, Button, Container, FormControl, InputAdornment,
+  InputLabel, LinearProgress, MenuItem, Select, Stack, TextField, Typography,
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import { useSnackbar } from 'notistack';
 import type { Articulo, Familia, Entidad } from '@/types';
 import { config } from '@/config';
-import {
-  fetchPagina, fetchTodoFiltrado, fetchFamilias, fetchProveedores, buscarPorCodigo, guardarPrecio,
-} from './prices.api';
+import { fetchTodosArticulos, fetchFamilias, fetchProveedores, guardarPrecio } from './prices.api';
 import { ArticuloRow } from './ArticuloRow';
 
 const TODOS = '';
-const PAGE = 100;
-const CAP = 5000;
+const MAX_RENDER = 300; // filas pintadas a la vez (la búsqueda opera sobre TODO)
 
-function texto(a: Articulo, field: string): string {
+function campo(a: Articulo, field: string): string {
   if (!field) return '';
   const v = a[field];
   return v != null ? String(v).toLowerCase() : '';
@@ -26,121 +23,55 @@ function texto(a: Articulo, field: string): string {
 export function PriceManager() {
   const { enqueueSnackbar } = useSnackbar();
 
+  const [articulos, setArticulos] = useState<Articulo[]>([]);
   const [familias, setFamilias] = useState<Familia[]>([]);
   const [proveedores, setProveedores] = useState<Entidad[]>([]);
 
-  const [famId, setFamId] = useState<string>(TODOS);
-  const [prvId, setPrvId] = useState<string>(TODOS);
-
-  const [rows, setRows] = useState<Articulo[]>([]);
-  const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
-  const [truncado, setTruncado] = useState(false);
-
   const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
   const [progreso, setProgreso] = useState<{ n: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const [famId, setFamId] = useState<string>(TODOS);
+  const [prvId, setPrvId] = useState<string>(TODOS);
   const [query, setQuery] = useState('');
   const [queryDeb, setQueryDeb] = useState('');
-  const [codigoRes, setCodigoRes] = useState<Articulo[]>([]);
 
-  const hayFiltro = famId !== TODOS || prvId !== TODOS;
-  const modoBrowse = !hayFiltro;
-
-  // --- Catálogos (familias + proveedores) --------------------------------
-  useEffect(() => {
-    Promise.all([fetchFamilias(), fetchProveedores()])
-      .then(([fams, provs]) => {
-        setFamilias(fams);
-        setProveedores(provs);
-      })
-      .catch(() => {
-        /* si fallan los catálogos, la lista sigue funcionando */
-      });
-  }, []);
-
-  // --- Carga de artículos según filtros ----------------------------------
   const cargar = useCallback(async () => {
     setLoading(true);
     setError(null);
     setProgreso(null);
     try {
-      const fam = famId || undefined;
-      const prv = prvId || undefined;
-      if (fam || prv) {
-        const { items, total: t, truncado: tr } = await fetchTodoFiltrado({
-          fam,
-          prv,
-          cap: CAP,
-          onProgress: (n, tt) => setProgreso({ n, total: tt }),
-        });
-        setRows(items);
-        setTotal(t);
-        setTruncado(tr);
-      } else {
-        const { items, total: t } = await fetchPagina({ page: 1, pageSize: PAGE });
-        setRows(items);
-        setTotal(t);
-        setTruncado(false);
-        setPage(1);
-      }
+      const [fams, provs] = await Promise.all([
+        fetchFamilias().catch(() => [] as Familia[]),
+        fetchProveedores().catch(() => [] as Entidad[]),
+      ]);
+      setFamilias(fams);
+      setProveedores(provs);
+      const arts = await fetchTodosArticulos((n, total) => setProgreso({ n, total }));
+      setArticulos(arts);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error cargando artículos');
     } finally {
       setLoading(false);
       setProgreso(null);
     }
-  }, [famId, prvId]);
+  }, []);
 
   useEffect(() => {
     void cargar();
   }, [cargar]);
 
-  const cargarMas = useCallback(async () => {
-    if (loadingMore || rows.length >= total) return;
-    setLoadingMore(true);
-    try {
-      const next = page + 1;
-      const { items } = await fetchPagina({ page: next, pageSize: PAGE });
-      setRows((prev) => [...prev, ...items]);
-      setPage(next);
-    } catch {
-      /* silencioso; el usuario puede reintentar */
-    } finally {
-      setLoadingMore(false);
-    }
-  }, [loadingMore, rows.length, total, page]);
-
-  // --- Búsqueda: debounce + lookup exacto en servidor --------------------
+  // Debounce ligero de la búsqueda de texto
   useEffect(() => {
-    const t = setTimeout(() => setQueryDeb(query), 350);
+    const t = setTimeout(() => setQueryDeb(query), 200);
     return () => clearTimeout(t);
   }, [query]);
-
-  useEffect(() => {
-    const q = queryDeb.trim();
-    if (q.length < 2) {
-      setCodigoRes([]);
-      return;
-    }
-    let vivo = true;
-    buscarPorCodigo(q)
-      .then((r) => vivo && setCodigoRes(r))
-      .catch(() => vivo && setCodigoRes([]));
-    return () => {
-      vivo = false;
-    };
-  }, [queryDeb]);
 
   const handleSave = useCallback(
     async (id: number, pvp: number) => {
       try {
         await guardarPrecio(id, pvp);
-        const upd = (a: Articulo) => (a.id === id ? { ...a, pvp } : a);
-        setRows((prev) => prev.map(upd));
-        setCodigoRes((prev) => prev.map(upd));
+        setArticulos((prev) => prev.map((a) => (a.id === id ? { ...a, pvp } : a)));
         enqueueSnackbar('Precio actualizado', { variant: 'success' });
       } catch (e) {
         enqueueSnackbar(e instanceof Error ? e.message : 'No se pudo guardar', { variant: 'error' });
@@ -157,50 +88,30 @@ export function PriceManager() {
       ),
     [proveedores]
   );
-  const famNombre = useCallback(
-    (id?: string) => familias.find((f) => f.id === id)?.name,
-    [familias]
-  );
+  const famNombre = useCallback((id?: string) => familias.find((f) => f.id === id)?.name, [familias]);
 
-  // --- Lista mostrada (filtro texto cliente + resultados exactos) --------
-  const displayRows = useMemo(() => {
+  // Filtrado + búsqueda SOBRE TODO el catálogo (en cliente)
+  const filtrados = useMemo(() => {
     const q = queryDeb.trim().toLowerCase();
     const refF = config.fields.referencia;
     const barF = config.fields.codigoBarras;
-    let base = rows;
-    if (q) {
-      base = rows.filter(
-        (a) =>
+    return articulos.filter((a) => {
+      if (famId && a.fam !== famId) return false;
+      if (prvId && String(a.prv ?? 0) !== prvId) return false;
+      if (q) {
+        const hit =
           a.name?.toLowerCase().includes(q) ||
           a.dsc?.toLowerCase().includes(q) ||
-          texto(a, refF).includes(q) ||
-          texto(a, barF).includes(q) ||
-          String(a.id).includes(q)
-      );
-      if (codigoRes.length) {
-        const ids = new Set(base.map((a) => a.id));
-        base = [...codigoRes.filter((a) => !ids.has(a.id)), ...base];
+          campo(a, refF).includes(q) ||
+          campo(a, barF).includes(q) ||
+          String(a.id).includes(q);
+        if (!hit) return false;
       }
-    }
-    return base;
-  }, [rows, queryDeb, codigoRes]);
+      return true;
+    });
+  }, [articulos, famId, prvId, queryDeb]);
 
-  // --- Scroll infinito (solo en modo browse, sin búsqueda de texto) ------
-  const sentinel = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (!modoBrowse || queryDeb.trim() || rows.length >= total) return;
-    const el = sentinel.current;
-    if (!el) return;
-    const obs = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting) void cargarMas();
-      },
-      { rootMargin: '400px' }
-    );
-    obs.observe(el);
-    return () => obs.disconnect();
-  }, [modoBrowse, queryDeb, rows.length, total, cargarMas]);
-
+  const visibles = filtrados.slice(0, MAX_RENDER);
   const proveedorSel = proveedores.find((p) => String(p.id) === prvId) ?? null;
 
   return (
@@ -253,37 +164,47 @@ export function PriceManager() {
             ? progreso
               ? `Cargando ${progreso.n} de ${progreso.total}…`
               : 'Cargando…'
-            : queryDeb
-              ? `${displayRows.length} coincidencia(s)`
-              : hayFiltro
-                ? `${rows.length} artículo(s)`
-                : `Mostrando ${rows.length} de ${total}`}
+            : `${filtrados.length} artículo(s)${
+                filtrados.length > MAX_RENDER ? ` · mostrando ${MAX_RENDER}` : ''
+              }`}
         </Typography>
         <Button size="small" startIcon={<RefreshIcon />} onClick={() => void cargar()} disabled={loading}>
           Actualizar
         </Button>
       </Stack>
 
-      {truncado && (
+      {loading && progreso && (
+        <LinearProgress
+          variant="determinate"
+          value={progreso.total ? (progreso.n / progreso.total) * 100 : 0}
+          sx={{ mb: 2 }}
+        />
+      )}
+
+      {filtrados.length > MAX_RENDER && !loading && (
         <Alert severity="info" sx={{ mb: 2 }}>
-          Mostrando los primeros {CAP} artículos del filtro. Afina con familia/proveedor o busca por
-          referencia/código de barras.
+          Hay {filtrados.length} coincidencias. Se muestran las primeras {MAX_RENDER}; afina la
+          búsqueda o los filtros para ver el resto.
         </Alert>
       )}
 
       {error && (
-        <Alert severity="error" sx={{ mb: 2 }} action={<Button onClick={() => void cargar()}>Reintentar</Button>}>
+        <Alert
+          severity="error"
+          sx={{ mb: 2 }}
+          action={<Button onClick={() => void cargar()}>Reintentar</Button>}
+        >
           {error}
         </Alert>
       )}
 
-      {loading ? (
+      {loading && !progreso ? (
         <Box sx={{ py: 4 }}>
           <LinearProgress />
         </Box>
       ) : (
         <Stack spacing={1}>
-          {displayRows.map((a) => (
+          {visibles.map((a) => (
             <ArticuloRow
               key={a.id}
               articulo={a}
@@ -292,21 +213,10 @@ export function PriceManager() {
               onSave={handleSave}
             />
           ))}
-
-          {!error && displayRows.length === 0 && (
+          {!error && !loading && filtrados.length === 0 && (
             <Typography color="text.secondary" align="center" sx={{ py: 6 }}>
               No hay artículos que coincidan.
             </Typography>
-          )}
-
-          {/* Cargar más (modo browse, sin búsqueda) */}
-          {modoBrowse && !queryDeb && rows.length < total && (
-            <>
-              <Box ref={sentinel} sx={{ height: 1 }} />
-              <Button onClick={() => void cargarMas()} disabled={loadingMore} sx={{ mt: 1 }}>
-                {loadingMore ? <CircularProgress size={20} /> : `Cargar más (${rows.length}/${total})`}
-              </Button>
-            </>
           )}
         </Stack>
       )}

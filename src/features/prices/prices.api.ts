@@ -57,86 +57,80 @@ export async function resolverCampos(): Promise<CamposArticulo> {
   return camposCache;
 }
 
-export interface PaginaParams {
-  fam?: string;
-  prv?: string;
-  page: number;
-  pageSize: number;
+// Paginación optimizada: páginas grandes + descarga en paralelo.
+const PAGE = 2000; // el API no impone tope; 2000 equilibra nº de peticiones y tamaño
+const CONC = 5; // descargas simultáneas
+
+type Progreso = (cargados: number, total: number) => void;
+
+interface FetchAllOpts {
+  fields?: string;
+  filter?: Record<string, string>;
+  sort?: string;
+  onProgress?: Progreso;
 }
 
-/** Una página de artículos: filtros de igualdad en servidor + orden por nombre. */
-export async function fetchPagina(p: PaginaParams) {
-  const { lista } = await resolverCampos();
-  const filter: Record<string, string> = {};
-  if (p.fam) filter.fam = p.fam;
-  if (p.prv) filter.prv = p.prv;
-  return list<Articulo>('art_m', {
-    page: p.page,
-    pageSize: p.pageSize,
-    sort: 'name',
-    fields: lista,
-    filter: Object.keys(filter).length ? filter : undefined,
+/** Ejecuta `worker` sobre `items` con concurrencia limitada. */
+async function pool<T>(items: T[], limit: number, worker: (item: T) => Promise<void>): Promise<void> {
+  let i = 0;
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (i < items.length) {
+      const idx = i++;
+      await worker(items[idx]);
+    }
   });
+  await Promise.all(runners);
 }
 
-/** Carga TODO un subconjunto filtrado (familia/proveedor), con tope de seguridad. */
-export async function fetchTodoFiltrado(opts: {
-  fam?: string;
-  prv?: string;
-  cap?: number;
-  onProgress?: (cargados: number, total: number) => void;
-}): Promise<{ items: Articulo[]; total: number; truncado: boolean }> {
-  const cap = opts.cap ?? 5000;
-  const pageSize = 500;
-  const all: Articulo[] = [];
-  let page = 1;
-  let total = 0;
-  for (;;) {
-    const { items, total: t } = await fetchPagina({ fam: opts.fam, prv: opts.prv, page, pageSize });
-    total = t;
-    all.push(...items);
-    opts.onProgress?.(all.length, total);
-    if (items.length === 0 || all.length >= total || all.length >= cap) break;
-    page += 1;
-  }
-  return { items: all, total, truncado: all.length < total };
+/**
+ * Lee TODOS los registros de una tabla:
+ * 1ª página (para conocer total_count) y el resto en paralelo, respetando orden.
+ */
+async function fetchAll<T>(table: string, opts: FetchAllOpts = {}): Promise<T[]> {
+  const { fields, filter, sort, onProgress } = opts;
+  const first = await list<T>(table, { page: 1, pageSize: PAGE, fields, filter, sort });
+  const total = first.total;
+  let cargados = first.items.length;
+  onProgress?.(cargados, total);
+  if (cargados >= total || first.items.length === 0) return first.items;
+
+  const totalPags = Math.ceil(total / PAGE);
+  const buckets: T[][] = new Array(totalPags + 1);
+  buckets[1] = first.items;
+
+  const restantes: number[] = [];
+  for (let p = 2; p <= totalPags; p++) restantes.push(p);
+
+  await pool(restantes, CONC, async (p) => {
+    const r = await list<T>(table, { page: p, pageSize: PAGE, fields, filter, sort });
+    buckets[p] = r.items;
+    cargados += r.items.length;
+    onProgress?.(cargados, total);
+  });
+
+  const out: T[] = [];
+  for (let p = 1; p <= totalPags; p++) if (buckets[p]) out.push(...buckets[p]);
+  return out;
 }
 
-/** Búsqueda EXACTA por id / referencia / código de barras (igualdad servidor). */
-export async function buscarPorCodigo(texto: string): Promise<Articulo[]> {
-  const { lista, refField, barField } = await resolverCampos();
-  const q = texto.trim();
-  if (!q) return [];
-
-  const filtrarPor = (campo: string) =>
-    list<Articulo>('art_m', { pageSize: 25, fields: lista, filter: { [campo]: q } })
-      .then((r) => r.items)
-      .catch(() => [] as Articulo[]);
-
-  const consultas: Promise<Articulo[]>[] = [];
-  if (/^\d+$/.test(q)) consultas.push(filtrarPor('id'));
-  if (barField) consultas.push(filtrarPor(barField));
-  if (refField) consultas.push(filtrarPor(refField));
-
-  const res = await Promise.all(consultas);
-  const map = new Map<number, Articulo>();
-  res.flat().forEach((a) => map.set(a.id, a));
-  return [...map.values()];
+/** Lee TODOS los artículos (con los campos disponibles), ordenados por nombre. */
+export async function fetchTodosArticulos(onProgress?: Progreso): Promise<Articulo[]> {
+  const { lista } = await resolverCampos();
+  return fetchAll<Articulo>('art_m', { fields: lista, sort: 'name', onProgress });
 }
 
-/** Todas las familias (fam_m) para el desplegable. */
+/** Todas las familias (fam_m). */
 export async function fetchFamilias(): Promise<Familia[]> {
-  const { items } = await list<Familia>('fam_m', { pageSize: 500, fields: 'id,name' });
+  const items = await fetchAll<Familia>('fam_m', { fields: 'id,name' });
   return items.sort((a, b) => a.name.localeCompare(b.name, 'es'));
 }
 
-/** Proveedores (ent_m con es_clt = false) para el desplegable buscable. */
+/** Todos los proveedores (ent_m con es_clt = false). */
 export async function fetchProveedores(): Promise<Entidad[]> {
-  const { items } = await list<Entidad>('ent_m', {
-    pageSize: 1000,
+  const items = await fetchAll<Entidad>('ent_m', {
     fields: 'id,nom_com,nom_fis',
     filter: { es_clt: 'false' },
-  });
+  }).catch(() => [] as Entidad[]);
   return items.sort((a, b) =>
     (a.nom_com || a.nom_fis || '').localeCompare(b.nom_com || b.nom_fis || '', 'es')
   );
