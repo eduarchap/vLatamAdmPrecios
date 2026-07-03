@@ -9,13 +9,17 @@
  * ========================================================================= */
 window.__APP_CONFIG__ = {
   /* Nombre del cliente/negocio (se muestra en la cabecera y el login) */
-  clientName: 'Karibe',
+  clientName: 'Ibiza',
 
-  /* URL base del API REST de Velneo (incluye .../v1, SIN barra final) */
-  apiUrl: 'https://app.karibe.com.ar/KARIBE_API/vLatamERP_db_dat/v1',
+  /* URL base del API REST.
+   * - API por HTTPS: pon aquí la URL completa (incluye .../v1, sin barra final).
+   * - API por HTTP (mixed content): usa el proxy de Netlify → deja '/api'
+   *   y define el destino real en netlify.toml (redirect /api/* → http://...).
+   */
+  apiUrl: '/api',
 
   /* API Key del proyecto */
-  apiKey: 'KARIBE_API_2025',
+  apiKey: 'ADMPRECIOS2026',
 
   /* --- Campos de la tabla de usuarios (USR_M) usados para el login ---------
    * Ajusta estos nombres a los campos que expongas en el recurso usr_m del

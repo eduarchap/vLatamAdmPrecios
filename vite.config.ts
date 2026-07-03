@@ -35,12 +35,17 @@ export default defineConfig({
         // config.js se edita por cliente tras el build: nunca precachearlo.
         globIgnores: ['**/config.js'],
         navigateFallback: 'index.html',
-        navigateFallbackDenylist: [/^\/config\.js$/],
+        navigateFallbackDenylist: [/^\/config\.js$/, /^\/api\//],
         runtimeCaching: [
           {
             urlPattern: ({ url }) => url.pathname.endsWith('/config.js'),
             handler: 'NetworkFirst',
             options: { cacheName: 'app-config' },
+          },
+          {
+            // El API (a través del proxy /api) siempre va a la red: precios frescos.
+            urlPattern: ({ url }) => url.pathname.startsWith('/api/'),
+            handler: 'NetworkOnly',
           },
         ],
       },
@@ -51,6 +56,16 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+    },
+  },
+  // Proxy solo para `npm run dev` (en producción lo hace netlify.toml).
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://200.89.178.100/IBIZA_API/vLatamERP_db_dat/v1',
+        changeOrigin: true,
+        rewrite: (p) => p.replace(/^\/api/, ''),
+      },
     },
   },
   build: {

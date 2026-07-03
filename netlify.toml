@@ -2,7 +2,18 @@
   command = "npm run build"
   publish = "dist"
 
-# SPA fallback: todas las rutas sirven index.html
+# --- Proxy HTTPS → API de Velneo -------------------------------------------
+# La web se sirve por HTTPS y el API es HTTP: el navegador bloquearía la
+# llamada directa (mixed content). Netlify reenvía /api/* al backend, así la
+# app llama same-origin por HTTPS y de paso se evita el CORS.
+# Para OTRO cliente: cambia sólo la URL destino de aquí abajo.
+[[redirects]]
+  from = "/api/*"
+  to = "http://200.89.178.100/IBIZA_API/vLatamERP_db_dat/v1/:splat"
+  status = 200
+  force = true
+
+# SPA fallback: el resto de rutas sirven index.html
 [[redirects]]
   from = "/*"
   to = "/index.html"
