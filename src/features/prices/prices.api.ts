@@ -1,6 +1,6 @@
-import { list, update, http } from '@/api/client';
+import { list, update, http, getOne } from '@/api/client';
 import { config } from '@/config';
-import type { Articulo, Familia, Entidad } from '@/types';
+import type { Articulo, Familia, Entidad, RelArtPrv, Proveedor } from '@/types';
 
 /* ==========================================================================
  *  Estrategia para volúmenes grandes (decenas de miles de artículos):
@@ -125,15 +125,26 @@ export async function fetchFamilias(): Promise<Familia[]> {
   return items.sort((a, b) => a.name.localeCompare(b.name, 'es'));
 }
 
-/** Todos los proveedores (ent_m con es_clt = false). */
-export async function fetchProveedores(): Promise<Entidad[]> {
-  const items = await fetchAll<Entidad>('ent_m', {
-    fields: 'id,nom_com,nom_fis',
-    filter: { es_clt: 'false' },
-  }).catch(() => [] as Entidad[]);
-  return items.sort((a, b) =>
-    (a.nom_com || a.nom_fis || '').localeCompare(b.nom_com || b.nom_fis || '', 'es')
+/** Todas las relaciones artículo↔proveedor (art_prv_g). */
+export async function fetchRelacionesArtPrv(): Promise<RelArtPrv[]> {
+  return fetchAll<RelArtPrv>('art_prv_g', { fields: 'art,prv' }).catch(
+    () => [] as RelArtPrv[]
   );
+}
+
+/**
+ * Resuelve los proveedores (ent_m) sólo para los ids indicados — normalmente
+ * los que aparecen en art_prv_g — para no cargar toda la tabla de contactos.
+ */
+export async function fetchProveedoresPorIds(ids: number[]): Promise<Proveedor[]> {
+  const unicos = [...new Set(ids.filter((id) => id > 0))];
+  const out: Proveedor[] = [];
+  await pool(unicos, CONC, async (id) => {
+    const e = await getOne<Entidad>('ent_m', id, 'id,nom_com,nom_fis').catch(() => null);
+    if (e) out.push({ id, nombre: e.nom_com || e.nom_fis || `Proveedor ${id}` });
+    else out.push({ id, nombre: `Proveedor ${id}` });
+  });
+  return out.sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
 }
 
 /** Guarda el nuevo precio de un artículo (POST /art_m/{id}). */

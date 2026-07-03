@@ -6,26 +6,24 @@ import {
 import SearchIcon from '@mui/icons-material/Search';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import { useSnackbar } from 'notistack';
-import type { Articulo, Familia, Entidad } from '@/types';
+import type { Articulo, Familia, Proveedor, RelArtPrv } from '@/types';
 import { config } from '@/config';
-import { fetchTodosArticulos, fetchFamilias, fetchProveedores, guardarPrecio } from './prices.api';
+import {
+  fetchTodosArticulos, fetchFamilias, fetchRelacionesArtPrv, fetchProveedoresPorIds, guardarPrecio,
+} from './prices.api';
 import { ArticuloRow } from './ArticuloRow';
+import { normalizar } from '@/format';
 
 const TODOS = '';
-const MAX_RENDER = 300; // filas pintadas a la vez (la búsqueda opera sobre TODO)
-
-function campo(a: Articulo, field: string): string {
-  if (!field) return '';
-  const v = a[field];
-  return v != null ? String(v).toLowerCase() : '';
-}
+const MAX_RENDER = 300; // filas pintadas a la vez (la búsqueda recorre TODO)
 
 export function PriceManager() {
   const { enqueueSnackbar } = useSnackbar();
 
   const [articulos, setArticulos] = useState<Articulo[]>([]);
   const [familias, setFamilias] = useState<Familia[]>([]);
-  const [proveedores, setProveedores] = useState<Entidad[]>([]);
+  const [proveedores, setProveedores] = useState<Proveedor[]>([]);
+  const [relaciones, setRelaciones] = useState<RelArtPrv[]>([]);
 
   const [loading, setLoading] = useState(true);
   const [progreso, setProgreso] = useState<{ n: number; total: number } | null>(null);
@@ -41,14 +39,16 @@ export function PriceManager() {
     setError(null);
     setProgreso(null);
     try {
-      const [fams, provs] = await Promise.all([
-        fetchFamilias().catch(() => [] as Familia[]),
-        fetchProveedores().catch(() => [] as Entidad[]),
-      ]);
+      const fams = await fetchFamilias().catch(() => [] as Familia[]);
       setFamilias(fams);
-      setProveedores(provs);
-      const arts = await fetchTodosArticulos((n, total) => setProgreso({ n, total }));
+      const [arts, rels] = await Promise.all([
+        fetchTodosArticulos((n, total) => setProgreso({ n, total })),
+        fetchRelacionesArtPrv(),
+      ]);
       setArticulos(arts);
+      setRelaciones(rels);
+      const prvIds = [...new Set(rels.map((r) => r.prv))];
+      setProveedores(await fetchProveedoresPorIds(prvIds));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error cargando artículos');
     } finally {
@@ -61,7 +61,6 @@ export function PriceManager() {
     void cargar();
   }, [cargar]);
 
-  // Debounce ligero de la búsqueda de texto
   useEffect(() => {
     const t = setTimeout(() => setQueryDeb(query), 200);
     return () => clearTimeout(t);
@@ -82,34 +81,50 @@ export function PriceManager() {
   );
 
   const provNombre = useMemo(
-    () =>
-      new Map(
-        proveedores.map((p) => [p.id, p.nom_com || p.nom_fis || `Proveedor ${p.id}`] as const)
-      ),
+    () => new Map(proveedores.map((p) => [p.id, p.nombre] as const)),
     [proveedores]
   );
   const famNombre = useCallback((id?: string) => familias.find((f) => f.id === id)?.name, [familias]);
 
-  // Filtrado + búsqueda SOBRE TODO el catálogo (en cliente)
-  const filtrados = useMemo(() => {
-    const q = queryDeb.trim().toLowerCase();
+  // Mapas artículo↔proveedor a partir de art_prv_g
+  const { prvToArts, artToPrv } = useMemo(() => {
+    const p2a = new Map<number, Set<number>>();
+    const a2p = new Map<number, number[]>();
+    for (const r of relaciones) {
+      if (!p2a.has(r.prv)) p2a.set(r.prv, new Set());
+      p2a.get(r.prv)!.add(r.art);
+      if (!a2p.has(r.art)) a2p.set(r.art, []);
+      a2p.get(r.art)!.push(r.prv);
+    }
+    return { prvToArts: p2a, artToPrv: a2p };
+  }, [relaciones]);
+
+  // Blob de búsqueda normalizado por artículo (precomputado = rápido en 40k)
+  const buscables = useMemo(() => {
     const refF = config.fields.referencia;
     const barF = config.fields.codigoBarras;
-    return articulos.filter((a) => {
-      if (famId && a.fam !== famId) return false;
-      if (prvId && String(a.prv ?? 0) !== prvId) return false;
-      if (q) {
-        const hit =
-          a.name?.toLowerCase().includes(q) ||
-          a.dsc?.toLowerCase().includes(q) ||
-          campo(a, refF).includes(q) ||
-          campo(a, barF).includes(q) ||
-          String(a.id).includes(q);
-        if (!hit) return false;
-      }
-      return true;
-    });
-  }, [articulos, famId, prvId, queryDeb]);
+    return articulos.map((a) => ({
+      a,
+      blob: normalizar(
+        [a.name, a.dsc, refF ? a[refF] : '', barF ? a[barF] : '', a.id]
+          .filter(Boolean)
+          .join(' ')
+      ),
+    }));
+  }, [articulos]);
+
+  const filtrados = useMemo(() => {
+    const q = normalizar(queryDeb);
+    const arts = prvId ? prvToArts.get(Number(prvId)) : null;
+    const out: Articulo[] = [];
+    for (const { a, blob } of buscables) {
+      if (famId && a.fam !== famId) continue;
+      if (prvId && !(arts && arts.has(a.id))) continue;
+      if (q && !blob.includes(q)) continue;
+      out.push(a);
+    }
+    return out;
+  }, [buscables, famId, prvId, queryDeb, prvToArts]);
 
   const visibles = filtrados.slice(0, MAX_RENDER);
   const proveedorSel = proveedores.find((p) => String(p.id) === prvId) ?? null;
@@ -149,7 +164,7 @@ export function PriceManager() {
             size="small"
             options={proveedores}
             value={proveedorSel}
-            getOptionLabel={(p) => p.nom_com || p.nom_fis || `Proveedor ${p.id}`}
+            getOptionLabel={(p) => p.nombre}
             isOptionEqualToValue={(a, b) => a.id === b.id}
             onChange={(_, val) => setPrvId(val ? String(val.id) : TODOS)}
             renderInput={(params) => <TextField {...params} label="Proveedor" />}
@@ -209,7 +224,9 @@ export function PriceManager() {
               key={a.id}
               articulo={a}
               familiaNombre={famNombre(a.fam)}
-              proveedorNombre={a.prv ? provNombre.get(a.prv) : undefined}
+              proveedores={(artToPrv.get(a.id) ?? []).map(
+                (id) => provNombre.get(id) ?? `Proveedor ${id}`
+              )}
               onSave={handleSave}
             />
           ))}

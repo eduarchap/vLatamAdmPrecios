@@ -29,6 +29,19 @@ export interface Entidad {
   nom_com?: string;
 }
 
+/** art_prv_g — Relación artículo ↔ proveedor (muchos a muchos) */
+export interface RelArtPrv {
+  art: number; // id de artículo (art_m)
+  prv: number; // id de proveedor (ent_m)
+  ref_prv?: string;
+}
+
+/** Proveedor listo para el desplegable */
+export interface Proveedor {
+  id: number;
+  nombre: string;
+}
+
 /** usr_m — Usuarios. Los campos de login son dinámicos (según config). */
 export interface Usuario {
   id: number;

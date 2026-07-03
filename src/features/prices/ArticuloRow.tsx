@@ -14,7 +14,7 @@ import { formatPrecio, parsePrecio } from '@/format';
 interface Props {
   articulo: Articulo;
   familiaNombre?: string;
-  proveedorNombre?: string;
+  proveedores?: string[];
   onSave: (id: number, pvp: number) => Promise<void>;
 }
 
@@ -24,7 +24,7 @@ function campoTexto(articulo: Articulo, field: string): string {
   return v != null ? String(v) : '';
 }
 
-export function ArticuloRow({ articulo, familiaNombre, proveedorNombre, onSave }: Props) {
+export function ArticuloRow({ articulo, familiaNombre, proveedores, onSave }: Props) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState('');
   const [saving, setSaving] = useState(false);
@@ -97,12 +97,12 @@ export function ArticuloRow({ articulo, familiaNombre, proveedorNombre, onSave }
             </Stack>
           )}
 
-          {/* Familia y proveedor */}
+          {/* Familia y proveedores */}
           <Stack direction="row" spacing={0.5} sx={{ mt: 0.5, flexWrap: 'wrap', gap: 0.5 }}>
             {familiaNombre && <Chip size="small" label={familiaNombre} />}
-            {proveedorNombre && (
-              <Chip size="small" color="secondary" variant="outlined" label={proveedorNombre} />
-            )}
+            {proveedores?.map((p) => (
+              <Chip key={p} size="small" color="secondary" variant="outlined" label={p} />
+            ))}
           </Stack>
         </Box>
 
