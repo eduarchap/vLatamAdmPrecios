@@ -11,7 +11,10 @@ import type { Articulo, Familia, Entidad } from '@/types';
  *  - Búsqueda parcial de texto → en cliente, sobre el subconjunto cargado.
  * ========================================================================== */
 
-const CAMPOS_BASE = ['id', 'name', 'dsc', 'fam', 'prv', 'pvp', 'por_dto', 'es_nue'];
+// Esenciales: presentes en cualquier cliente (app de precios).
+const ESENCIALES = ['id', 'name', 'pvp'];
+// Opcionales fijos: se usan si existen (varían entre clientes/proyectos).
+const OPCIONALES = ['dsc', 'fam', 'prv'];
 
 export interface CamposArticulo {
   lista: string; // csv para el parámetro `fields`
@@ -31,18 +34,25 @@ async function campoExiste(field: string): Promise<boolean> {
   }
 }
 
-/** Resuelve una sola vez qué campos opcionales (ref/barras) están disponibles. */
+/**
+ * Resuelve una sola vez qué campos existen en art_m para ESTE cliente.
+ * Así la app se adapta a esquemas distintos sin romper la query pidiendo
+ * campos inexistentes (p.ej. Karibe tiene por_dto/es_nue e Ibiza no).
+ */
 export async function resolverCampos(): Promise<CamposArticulo> {
   if (camposCache) return camposCache;
   const refCfg = config.fields.referencia.trim();
   const barCfg = config.fields.codigoBarras.trim();
-  const [refOk, barOk] = await Promise.all([
-    refCfg ? campoExiste(refCfg) : Promise.resolve(false),
-    barCfg ? campoExiste(barCfg) : Promise.resolve(false),
-  ]);
-  const refField = refOk ? refCfg : null;
-  const barField = barOk ? barCfg : null;
-  const lista = [...CAMPOS_BASE, refField, barField].filter(Boolean).join(',');
+  const candidatos = [...OPCIONALES, refCfg, barCfg].filter(Boolean);
+
+  const checks = await Promise.all(
+    candidatos.map(async (f) => [f, await campoExiste(f)] as const)
+  );
+  const presentes = checks.filter(([, ok]) => ok).map(([f]) => f);
+
+  const refField = refCfg && presentes.includes(refCfg) ? refCfg : null;
+  const barField = barCfg && presentes.includes(barCfg) ? barCfg : null;
+  const lista = [...ESENCIALES, ...presentes].join(',');
   camposCache = { lista, refField, barField };
   return camposCache;
 }

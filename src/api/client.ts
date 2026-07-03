@@ -21,9 +21,12 @@ http.interceptors.response.use(
     if (body && typeof body === 'object') {
       if (Array.isArray(body.errors) && body.errors.length > 0) {
         const msg = body.errors
-          .map((e: { detail?: string; title?: string }) => e.detail || e.title)
+          .map((e: string | { detail?: string; title?: string }) =>
+            typeof e === 'string' ? e : e.detail || e.title
+          )
+          .filter(Boolean)
           .join('; ');
-        return Promise.reject(new Error(msg));
+        return Promise.reject(new Error(msg || 'Error del API'));
       }
       if (typeof body.error === 'string' && body.error) {
         return Promise.reject(new Error(body.error));
